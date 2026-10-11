@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#142321">
+    <title>Sign in · PetCam</title>
+    <link rel="stylesheet" href="/assets/styles.css">
+    <script type="module" src="/assets/login.js"></script>
+  </head>
+  <body class="login-page">
+    <main id="app" class="login-card" data-state="offline" aria-labelledby="login-title">
+      <div class="brand-mark" aria-hidden="true">P</div>
+      <p class="eyebrow">HOME PET MONITOR</p>
+      <h1 id="login-title">Welcome back</h1>
+      <p class="muted">Sign in to check in on your pets.</p>
+      <p class="station-note login-station-hint" id="station-hint" hidden></p>
+      <form id="login-form" method="post" action="/api/login">
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" required autofocus>
+        <p class="form-error" id="login-error" role="alert" aria-live="polite"></p>
+        <button class="button button-primary full-width" type="submit" disabled>Sign in</button>
+      </form>
+      <p class="certificate-link"><a href="/ca.crt">Install this once on your phone so you never see a certificate warning</a></p>
+      <p class="privacy-note"><span aria-hidden="true">●</span> Private on your home network</p>
+    </main>
+  </body>
+</html>

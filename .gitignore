@@ -1,0 +1,10 @@
+node_modules/
+dist/
+# Secrets & generated state: password hash, session secret, TLS key/cert
+data/
+.env
+# Playwright browsers and reports (kept inside the repo dir)
+.cache/
+test-results/
+playwright-report/
+.qa/

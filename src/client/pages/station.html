@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#101b19">
+    <title>PetCam station</title>
+    <link rel="stylesheet" href="/assets/styles.css">
+    <script type="module" src="/assets/station.js"></script>
+  </head>
+  <body class="station-page">
+    <main id="app" class="station-app" data-state="offline">
+      <header class="topbar">
+        <a class="brand" href="/" aria-label="PetCam home"><span class="brand-mark small" aria-hidden="true">P</span><span>PetCam</span></a>
+        <div class="connection-pill" role="status" aria-live="polite"><span class="status-dot" aria-hidden="true"></span><span id="status-label">Idle</span></div>
+      </header>
+      <section class="station-content">
+        <div class="station-heading"><p class="eyebrow">YOUR HOME STATION</p><h1>PetCam station</h1><p class="muted">Keep this page open to stay connected to your camera.</p></div>
+        <section class="station-screen" aria-label="Camera preview">
+          <video id="pet-video" class="pet-video" autoplay playsinline muted aria-label="Laptop camera preview"></video>
+          <video id="owner-video" class="owner-video" autoplay playsinline hidden aria-label="Your video when you talk to your pets"></video>
+          <audio id="owner-audio" autoplay></audio>
+          <div class="station-placeholder" id="station-placeholder"><div class="empty-orbit" aria-hidden="true"><span>🐾</span></div><h2>Ready when you are</h2><p id="station-message">Start your station to connect the camera and microphone.</p></div>
+          <div id="talk-banner" class="talk-banner" hidden><span class="live-indicator" aria-hidden="true"></span> Your person is talking</div>
+          <div class="sound-blocked" id="sound-blocked" hidden><p id="sound-blocked-message">Sound from your phone is blocked.</p><button id="enable-sound-button" class="button button-primary" type="button">Enable sound</button></div>
+        </section>
+        <div class="station-actions"><button id="start-button" class="button button-primary" type="button"><span aria-hidden="true">▶</span> Start station</button><button id="stop-button" class="button button-secondary" type="button" hidden>Stop station</button></div>
+        <p class="station-note"><span aria-hidden="true">◉</span> This station is open on the laptop. Your camera stream stays on this network and is never recorded.</p>
+      </section>
+      <footer class="page-footer"><span>PetCam · Home camera</span><a href="/">Open viewer</a></footer>
+    </main>
+  </body>
+</html>

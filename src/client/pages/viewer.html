@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#101b19">
+    <title>PetCam</title>
+    <link rel="stylesheet" href="/assets/styles.css">
+    <script type="module" src="/assets/viewer.js"></script>
+  </head>
+  <body class="viewer-page">
+    <main id="app" class="viewer-app" data-state="offline">
+      <header class="topbar">
+        <a class="brand" href="/" aria-label="PetCam home"><span class="brand-mark small" aria-hidden="true">P</span><span>PetCam</span></a>
+        <div class="connection-pill" id="connection-status" role="status" aria-live="polite"><span class="status-dot" aria-hidden="true"></span><span id="status-label">Connecting</span></div>
+      </header>
+      <section class="viewer-stage" aria-label="Pet camera">
+        <video id="pet-video" class="pet-video" autoplay playsinline muted aria-label="Live view from your pet camera"></video>
+        <video id="self-video" class="self-video" autoplay playsinline muted aria-label="Your camera preview" hidden></video>
+        <div class="stage-overlay" id="empty-state">
+          <div class="empty-orbit" aria-hidden="true"><span>🐾</span></div>
+          <h1 id="stage-heading">Getting your camera ready…</h1>
+          <p id="stage-message">PetCam is connecting securely to your station.</p>
+          <button id="reconnect-button" class="button button-secondary" type="button" hidden>Reconnect</button>
+        </div>
+        <button id="sound-button" class="sound-prompt" type="button" aria-label="Tap for sound">
+          <span aria-hidden="true">◖))</span><span>Tap for sound</span>
+        </button>
+        <div class="camera-caption"><span class="live-indicator" aria-hidden="true"></span><span>Home camera</span></div>
+      </section>
+      <section class="viewer-controls" aria-label="Talk to your pets">
+        <div class="talk-copy"><h2>Say hello</h2><p id="talk-hint">Choose how you’d like to talk to your pets.</p></div>
+        <div class="talk-actions">
+          <button id="talk-button" class="button button-primary talk-button" type="button" disabled><span aria-hidden="true">◉</span> Talk</button>
+          <button id="ptt-button" class="button button-secondary ptt-button" type="button" disabled aria-pressed="false"><span aria-hidden="true">🎙</span> Push to talk</button>
+        </div>
+        <button id="stop-talk-button" class="stop-button" type="button" hidden>Stop talking</button>
+      </section>
+      <footer class="page-footer"><span>Secure connection · Video stays between your devices</span><a href="/station">Station setup</a></footer>
+    </main>
+  </body>
+</html>

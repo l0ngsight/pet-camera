@@ -1,0 +1,36 @@
+{
+  "name": "petcam",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Monitor pets from your phone and talk to them, over the LAN/VPN, via WebRTC.",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "start": "node scripts/build.mjs && node --env-file-if-exists=.env dist/server/main.js",
+    "dev": "node scripts/build.mjs --watch",
+    "set-password": "node scripts/build.mjs && node --env-file-if-exists=.env dist/server/set-password.js",
+    "revoke-sessions": "node scripts/build.mjs && node --env-file-if-exists=.env dist/server/set-password.js --revoke-sessions",
+    "typecheck": "tsc -p tsconfig.server.json --noEmit && tsc -p tsconfig.client.json --noEmit",
+    "test:unit": "vitest run test/unit",
+    "test:setup": "PLAYWRIGHT_BROWSERS_PATH=.cache/ms-playwright playwright install chromium",
+    "test:e2e": "PLAYWRIGHT_BROWSERS_PATH=.cache/ms-playwright playwright test",
+    "test": "npm run typecheck && npm run test:unit && npm run test:e2e"
+  },
+  "dependencies": {
+    "@peculiar/asn1-schema": "^2.10.0",
+    "@peculiar/asn1-x509": "^2.10.0",
+    "@peculiar/x509": "1.14.3",
+    "ws": "^8.22.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.64.0",
+    "@types/node": "^24.19.2",
+    "@types/ws": "^8.18.2",
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.3"
+  }
+}
