@@ -115,6 +115,7 @@ export interface RateLimiterOptions {
   /** Attempts per IP per window. */
   maxFailures: number;
   windowMs: number;
+  /** Cap on tracked addresses. When full, the oldest entry that is neither locked out nor in flight is evicted; if there is none, new addresses are refused. */
   maxEntries: number;
   /** More than this many failures (all IPs) within the window delays every login by globalDelayMs. */
   globalFailureThreshold: number;
@@ -147,7 +148,21 @@ export function createRateLimiter(opts: RateLimiterOptions) {
         return { ok: false, retryAfterSec: Math.ceil((e.windowStart + opts.windowMs - now()) / 1000) };
       }
       if (!e) {
-        if (entries.size >= opts.maxEntries) entries.delete(entries.keys().next().value as string);
+        if (entries.size >= opts.maxEntries) {
+          // Never evict a locked-out or in-flight address: cycling through fresh addresses must not reset a lockout.
+          let victim: string | undefined;
+          for (const [key, v] of entries) {
+            if (!v.inflight && (v.count < opts.maxFailures || now() - v.windowStart >= opts.windowMs)) {
+              victim = key;
+              break;
+            }
+          }
+          if (victim === undefined) {
+            const oldest = entries.values().next().value!;
+            return { ok: false, retryAfterSec: Math.max(1, Math.ceil((oldest.windowStart + opts.windowMs - now()) / 1000)) };
+          }
+          entries.delete(victim);
+        }
         e = { count: 0, windowStart: now(), inflight: false };
         entries.set(ip, e);
       }

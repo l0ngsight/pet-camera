@@ -32,6 +32,8 @@ export interface TestServer {
   dataDir: string;
   /** Number of password verifications (i.e. scrypt runs for a hashed password) the server started. */
   verifyCalls(): number;
+  /** Most password verifications that were running at the same time. */
+  maxConcurrentVerifies(): number;
   /** Delays the server applied to logins because of the global failure budget. */
   appliedDelays: number[];
   tls: TlsMaterial;
@@ -75,11 +77,18 @@ async function startIn(root: string, extraEnv: Record<string, string>, o: TestSe
     { hashParams: { N: 1024, r: 8, p: 1 }, watchIntervalMs: 30 },
   );
   let calls = 0;
+  let running = 0;
+  let maxRunning = 0;
   const realVerify = config.verifyPassword.bind(config);
   config.verifyPassword = async (candidate) => {
     calls++;
-    if (o.verifyDelayMs) await new Promise((r) => setTimeout(r, o.verifyDelayMs));
-    return realVerify(candidate);
+    maxRunning = Math.max(maxRunning, ++running);
+    try {
+      if (o.verifyDelayMs) await new Promise((r) => setTimeout(r, o.verifyDelayMs));
+      return await realVerify(candidate);
+    } finally {
+      running--;
+    }
   };
   const appliedDelays: number[] = [];
   const tls = o.tls ?? (await sharedTls());
@@ -96,6 +105,7 @@ async function startIn(root: string, extraEnv: Record<string, string>, o: TestSe
   return {
     port, server, config, root, dataDir, tls, appliedDelays,
     verifyCalls: () => calls,
+    maxConcurrentVerifies: () => maxRunning,
     stop: async () => { await server.stop(); await rm(root, { recursive: true, force: true }); },
   };
 }

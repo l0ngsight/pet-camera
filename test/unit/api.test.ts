@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { X509Certificate } from 'node:crypto';
 import { SESSION_COOKIE } from '../../src/server/auth';
 import { revokeSessions, setPassword } from '../../src/server/config';
+import { rateLimitKey } from '../../src/server/http';
 import { cleanupSharedTls, cookiePair, login, openWs, PASSWORD, postJson, request, startTestServer, type TestServer } from './helpers';
 
 let srv: TestServer;
@@ -316,6 +317,74 @@ describe('login brute-force defences', () => {
     const ok = await postJson(srv.port, '/api/login', { password: PASSWORD }, { 'x-test-remote': '10.2.0.1' });
     expect(ok.status).toBe(204); // the owner still gets in
     expect(srv.appliedDelays).toEqual([2000]);
+  });
+
+  it('once the budget is exceeded, logins from many addresses run one at a time and only 5 may wait; the laptop skips the queue', async () => {
+    const slow = await startTestServer({}, { verifyDelayMs: 40 });
+    try {
+      for (let i = 0; i <= 20; i++) {
+        await postJson(slow.port, '/api/login', { password: 'wrong-password' }, { 'x-test-remote': `10.1.0.${i}` });
+      }
+      const before = slow.verifyCalls();
+      const [laptop, ...burst] = await Promise.all([
+        postJson(slow.port, '/api/login', { password: PASSWORD }), // 127.0.0.1
+        ...Array.from({ length: 12 }, (_, i) => postJson(slow.port, '/api/login', { password: 'wrong-password' }, { 'x-test-remote': `10.3.0.${i}` })),
+      ]);
+      expect(laptop!.status).toBe(204);
+      expect(burst.filter((r) => r.status === 401).length).toBeLessThanOrEqual(5);
+      expect(burst.filter((r) => r.status === 429).length).toBeGreaterThanOrEqual(7);
+      expect(slow.verifyCalls() - before).toBeLessThanOrEqual(6); // ≤ 5 queued + the laptop
+      // the queued ones never overlapped each other; at most the laptop's check ran alongside one of them
+      expect(slow.maxConcurrentVerifies()).toBeLessThanOrEqual(2);
+    } finally { await slow.stop(); }
+  });
+
+  it('a refused (queue full) attempt does not use up that address\'s 5 attempts', async () => {
+    const slow = await startTestServer({}, { verifyDelayMs: 40 });
+    try {
+      for (let i = 0; i <= 20; i++) {
+        await postJson(slow.port, '/api/login', { password: 'wrong-password' }, { 'x-test-remote': `10.1.0.${i}` });
+      }
+      const burst = await Promise.all(Array.from({ length: 10 }, (_, i) =>
+        postJson(slow.port, '/api/login', { password: 'wrong-password' }, { 'x-test-remote': `10.4.0.${i}` })));
+      const refused = burst.findIndex((r) => r.status === 429);
+      expect(refused).toBeGreaterThanOrEqual(0);
+      for (let i = 0; i < 5; i++) {
+        const r = await postJson(slow.port, '/api/login', { password: 'wrong-password' }, { 'x-test-remote': `10.4.0.${refused}` });
+        expect(r.status).toBe(401);
+      }
+    } finally { await slow.stop(); }
+  });
+
+  it('counts IPv6 addresses per /64, so one host cannot rotate through its prefix', async () => {
+    for (let i = 1; i <= 5; i++) {
+      const r = await postJson(srv.port, '/api/login', { password: 'wrong-password' }, { 'x-test-remote': `2001:db8:1:2::${i}` });
+      expect(r.status).toBe(401);
+    }
+    const sameNet = await postJson(srv.port, '/api/login', { password: PASSWORD }, { 'x-test-remote': '2001:db8:1:2:aaaa:bbbb:cccc:dddd' });
+    expect(sameNet.status).toBe(429);
+    const otherNet = await postJson(srv.port, '/api/login', { password: PASSWORD }, { 'x-test-remote': '2001:db8:1:3::1' });
+    expect(otherNet.status).toBe(204);
+  });
+});
+
+describe('rateLimitKey', () => {
+  it('keeps IPv4 as is and unwraps IPv4-mapped IPv6', () => {
+    expect(rateLimitKey('192.168.1.5')).toBe('192.168.1.5');
+    expect(rateLimitKey('::ffff:192.168.1.5')).toBe('192.168.1.5');
+    expect(rateLimitKey('::FFFF:10.0.0.1')).toBe('10.0.0.1');
+  });
+
+  it('reduces IPv6 to its /64 whatever the notation', () => {
+    const key = '2001:db8:0:1::/64';
+    expect(rateLimitKey('2001:db8:0:1::1')).toBe(key);
+    expect(rateLimitKey('2001:0db8:0000:0001:ffff:ffff:ffff:ffff')).toBe(key);
+    expect(rateLimitKey('2001:db8:0:1:0:0:0:2')).toBe(key);
+    expect(rateLimitKey('2001:db8::1:0:0:0')).toBe('2001:db8:0:0::/64'); // :: expands in the middle
+    expect(rateLimitKey('2001:db8:0:1::1.2.3.4')).toBe(key);
+    expect(rateLimitKey('fe80::1%eth0')).toBe('fe80:0:0:0::/64');
+    expect(rateLimitKey('::1')).toBe('0:0:0:0::/64');
+    expect(rateLimitKey('2001:db8:0:1::1')).not.toBe(rateLimitKey('2001:db8:0:2::1'));
   });
 });
 

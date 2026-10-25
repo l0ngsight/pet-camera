@@ -91,6 +91,31 @@ export interface HttpDeps {
 const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
 export const isLoopback = (addr: string | undefined): boolean => addr !== undefined && LOOPBACK.has(addr);
 
+/** While the global failure budget is exceeded, at most this many logins may be running or queued at once; more get 429. */
+const MAX_THROTTLED_LOGINS = 5;
+
+/**
+ * Rate-limit bucket for an address: IPv4 as is (IPv4-mapped IPv6 unwrapped), IPv6 by its /64,
+ * because a single host can use any address in its /64.
+ */
+export function rateLimitKey(ip: string): string {
+  const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i.exec(ip);
+  if (mapped) return mapped[1]!;
+  if (!ip.includes(':')) return ip;
+  const toGroups = (part: string): string[] =>
+    part === ''
+      ? []
+      : part.split(':').flatMap((g) => {
+          if (!g.includes('.')) return [g];
+          const [a = 0, b = 0, c = 0, d = 0] = g.split('.').map(Number);
+          return [((a << 8) | b).toString(16), ((c << 8) | d).toString(16)];
+        });
+  const [head = '', tail] = ip.split('%')[0]!.split('::');
+  const h = toGroups(head);
+  const groups = tail === undefined ? h : [...h, ...Array<string>(Math.max(0, 8 - h.length - toGroups(tail).length)).fill('0'), ...toGroups(tail)];
+  return `${groups.slice(0, 4).map((g) => parseInt(g, 16).toString(16)).join(':')}::/64`;
+}
+
 export function createHttpHandlers({ config, assets, log, caPem, now = Date.now, remoteAddress, loginDelay }: HttpDeps) {
   const limiter = createRateLimiter({
     maxFailures: 5,
@@ -104,6 +129,16 @@ export function createHttpHandlers({ config, assets, log, caPem, now = Date.now,
   const remote = remoteAddress ?? ((req: IncomingMessage) => req.socket.remoteAddress);
   const sleep = loginDelay ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const caBody = caPem === undefined ? undefined : Buffer.from(caPem);
+  // Once the global failure budget is exceeded, logins from other machines run one at a time, so the delay
+  // caps the total guess rate instead of being slept through in parallel from many addresses.
+  let throttleTail: Promise<unknown> = Promise.resolve();
+  let throttled = 0;
+  function oneAtATime<T>(fn: () => Promise<T>): Promise<T> {
+    throttled++;
+    const run = throttleTail.then(fn).finally(() => void throttled--);
+    throttleTail = run.catch(() => {});
+    return run;
+  }
 
   /** Exact match, port included. Browsers always send Origin on non-GET requests and on WebSocket handshakes. */
   function originMatches(req: IncomingMessage): boolean {
@@ -184,19 +219,30 @@ export function createHttpHandlers({ config, assets, log, caPem, now = Date.now,
     // The attempt is counted *before* the slow hash, and only one may be in flight per address,
     // so parallel requests can't each get a free guess.
     const ip = remote(req) ?? 'unknown';
-    const attempt = limiter.begin(ip);
+    const rateLimited = (retryAfterSec: number) =>
+      sendJson(res, 429, { error: 'rate_limited', retryAfterSec }, { 'Retry-After': String(retryAfterSec) });
+    // The laptop itself can't be one of many attacking addresses, so it never waits in the global queue.
+    const queue = limiter.globalDelayMs() > 0 && !isLoopback(ip);
+    if (queue && throttled >= MAX_THROTTLED_LOGINS) {
+      log('warn', 'login rate limited: global queue full', { ip });
+      return rateLimited(2);
+    }
+    const attempt = limiter.begin(rateLimitKey(ip));
     if (!attempt.ok) {
       log('warn', 'login rate limited', { ip });
-      return sendJson(res, 429, { error: 'rate_limited', retryAfterSec: attempt.retryAfterSec }, { 'Retry-After': String(attempt.retryAfterSec) });
+      return rateLimited(attempt.retryAfterSec);
     }
     let ok = false;
     try {
-      const delayMs = limiter.globalDelayMs();
-      if (delayMs > 0) {
-        log('warn', 'many failed logins; delaying logins', { delayMs });
-        await sleep(delayMs);
-      }
-      ok = await config.verifyPassword(password);
+      const check = async () => {
+        const delayMs = limiter.globalDelayMs();
+        if (delayMs > 0) {
+          log('warn', 'many failed logins; delaying logins', { delayMs });
+          await sleep(delayMs);
+        }
+        return config.verifyPassword(password);
+      };
+      ok = await (queue ? oneAtATime(check) : check());
     } finally {
       attempt.finish(ok);
     }

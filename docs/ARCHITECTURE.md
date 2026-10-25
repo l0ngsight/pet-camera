@@ -105,12 +105,12 @@ Every response sets these headers: `Content-Security-Policy: default-src 'self';
 - **Cookie**: `__Host-petcam_session=<expSec>.<base64url HMAC(key, "petcam:" + expSec)>; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=2592000` (30 days, no `Domain`). The `__Host-` prefix makes the browser enforce all of these. To verify, `expSec` must match `/^\d{1,10}$/`. Compute the HMAC over that exact string and compare with `timingSafeEqual`. Reject if `exp < now` or `exp > now + 30 d + 60 s`. Every `GET /api/session` re-issues the cookie, so the station's sliding expiry never lapses.
 - **Login page** reads `next`, which must be exactly `/` or `/station`, and otherwise falls back to `/` (no open redirect). It POSTs with `fetch` and then sets `location = next`.
 - **Password check**: **async** `crypto.scrypt` (N=2^15, r=8, p=1, 32-byte salt, **`maxmem: 64 MiB`**, because the default throws on Node 24) with `timingSafeEqual`. Never use `scryptSync`. For `PETCAM_PASSWORD`, compare the SHA-256 digests with `timingSafeEqual`.
-- **Rate limit**: in memory, keyed by `req.socket.remoteAddress` (no proxy, so ignore `X-Forwarded-For`).
+- **Rate limit**: in memory, keyed by `req.socket.remoteAddress` (no proxy, so ignore `X-Forwarded-For`). IPv4-mapped IPv6 is unwrapped, and IPv6 is keyed by its `/64`, because one host can use any address in its prefix.
   - **Count the attempt before `await scrypt`**, so parallel requests can't bypass the limit.
   - Allow **one in-flight attempt per IP**. Others get 429 immediately.
   - Once an IP has 5 attempts counted within 15 min, it gets 429 until the window ends. A successful login clears that IP's count.
-  - **Global budget**: if there are more than 20 failures across all IPs within 15 min, every login is delayed by 2 s and a warning is logged. This is a delay, not a lockout, so the owner can always get in.
-  - The map is capped at 1000 entries, evicting the oldest first.
+  - **Global budget**: if there are more than 20 failures across all IPs within 15 min, every login is delayed by 2 s and a warning is logged. Logins from non-loopback addresses then go through a **single global queue** (delay + hash, one at a time), so the delay bounds the total guess rate (about one every 2 s) instead of being slept through in parallel from many addresses. At most 5 may be running or queued; more get 429 without being counted against their address. Loopback logins skip the queue, so the owner can always sign in at the laptop, and existing sessions are unaffected.
+  - The map is capped at 1000 entries. When it is full, the oldest entry that is neither locked out nor in flight is evicted; if every entry is locked out or in flight, new addresses get 429. Cycling through addresses can't reset a lockout.
   - Unit test: 20 concurrent wrong logins from one IP make at most 5 scrypt calls.
 
 ## 7. Signaling protocol (WSS `/ws?role=…`, JSON text frames, types in `src/shared/protocol.ts`)
