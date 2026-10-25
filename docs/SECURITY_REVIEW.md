@@ -190,3 +190,16 @@ The sliding 30-day cookie; viewer-slot DoS by a password holder; that a localhos
 - **L7 closed**: `login.html` now has `<form id="login-form" method="post" action="/api/login">`. A native pre-JS submit is a same-origin form-encoded POST, which gets **415** from the server (probed earlier: a form-encoded login returns 415). Nothing goes into the URL or history.
 - **L8 closed**: the stale `TODO(verify)` about the dated CA name has been removed from USER_GUIDE. The "laptop download first" ordering stays a non-blocking recommendation.
 - **Final security verdict: PASS. All findings M1–M3 and L1–L8 are closed, except the deferred L4 Host→421 check, which is an accepted risk.**
+
+### L9 — Login rate limit could be bypassed with many addresses (Low–Medium, fixed 2026-10-25)
+- **Location**: `src/server/auth.ts` `createRateLimiter`, `src/server/http.ts` `handleLogin`.
+- **Impact**: two gaps let an attacker who controls many source addresses (several IPs on the LAN, or any number of IPv6 addresses once `PETCAM_HOST=::`) guess far faster than M3 intended:
+  1. The global 2 s delay was a per-request `sleep`, so requests from different addresses all slept in parallel. It added latency, not a throughput cap. Probe: 250 addresses in a /24 got 1250 guesses in one 15-min window.
+  2. When the 1000-entry map was full, the oldest entry was evicted even if it was locked out, so cycling through 1000 fresh addresses reset an address's lockout.
+  With IPv6 each address of a /64 was its own bucket, so one host had an effectively unlimited number of buckets. The guess rate was then bounded only by scrypt throughput (tens per second). The generated 16-char password is out of reach; a weak user-chosen 12-char one is not.
+- **Fix**:
+  1. Once the global budget is exceeded, non-loopback logins (delay + hash) run through one global queue, so overall throughput is about one guess per 2 s. At most 5 may be running or queued; extra requests get 429 before they are counted against their address. Loopback skips the queue, so a distributed attack can't stop the owner signing in at the laptop.
+  2. Eviction picks the oldest entry that is not locked out and not in flight. If there is none, the new address gets 429.
+  3. IPv6 is keyed by its /64, and IPv4-mapped addresses by the IPv4 address.
+- **Trade-off (accepted)**: while an attack keeps the global budget exceeded, a *new* login from the phone may get 429 when the queue is full. Phones already signed in keep working (sliding 30-day cookie), and the laptop is never queued. This replaces the old "a delay, never a lockout" wording, which only held because the delay didn't limit anything.
+- **Tests**: `auth.test.ts` (eviction keeps lockouts, refuses when every slot is locked or in flight, expired lockouts are evictable), `api.test.ts` (throttled logins from 12 addresses never overlap, at most 5 run, the laptop gets in during the burst; a queue-full 429 doesn't use up the address's attempts; IPv6 per /64; `rateLimitKey` notation cases). All of them fail against the previous code.

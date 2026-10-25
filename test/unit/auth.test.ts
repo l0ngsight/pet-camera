@@ -205,16 +205,44 @@ describe('rate limiter', () => {
     for (let i = 0; i < 5; i++) expect(failOnce(rl, 'a').ok).toBe(true);
   });
 
-  it('caps the map, evicting the oldest entry first', () => {
+  it('caps the map, evicting the oldest entry that is not locked out', () => {
     const t = { now: 0 };
     const rl = make(t, { maxEntries: 3 });
-    for (const ip of ['a', 'b', 'c', 'd']) {
-      for (let i = 0; i < 5; i++) failOnce(rl, ip);
-      t.now += 1;
-    }
+    for (let i = 0; i < 5; i++) failOnce(rl, 'locked');
+    failOnce(rl, 'b');
+    failOnce(rl, 'c');
+    t.now += 1;
+    failOnce(rl, 'd'); // evicts b, the oldest that is not locked out
     expect(rl.size()).toBe(3);
-    expect(rl.begin('a').ok).toBe(true); // evicted
-    expect(rl.begin('d').ok).toBe(false);
+    expect(rl.begin('locked').ok).toBe(false);
+    for (let i = 0; i < 4; i++) failOnce(rl, 'c');
+    expect(rl.begin('c').ok).toBe(false); // c kept its earlier failure
+    const b = rl.begin('b'); // evicted, so it starts afresh (and evicts d)
+    expect(b.ok).toBe(true);
+  });
+
+  it('never resets a lockout by cycling through new addresses; refuses them when every slot is locked or in flight', () => {
+    const t = { now: 0 };
+    const rl = make(t, { maxEntries: 3 });
+    for (const ip of ['a', 'b']) for (let i = 0; i < 5; i++) failOnce(rl, ip);
+    const inflight = rl.begin('c');
+    expect(inflight.ok).toBe(true);
+    t.now += 60_000;
+    expect(rl.begin('fresh')).toEqual({ ok: false, retryAfterSec: 840 });
+    for (let i = 0; i < 100; i++) rl.begin(`x${i}`);
+    expect(rl.begin('a').ok).toBe(false);
+    expect(rl.size()).toBe(3);
+    inflight.ok && inflight.finish(false);
+    expect(rl.begin('fresh').ok).toBe(true); // c (1 failure, not locked) is now evictable
+  });
+
+  it('evicts a lockout whose window has passed', () => {
+    const t = { now: 0 };
+    const rl = make(t, { maxEntries: 2 });
+    for (const ip of ['a', 'b']) for (let i = 0; i < 5; i++) failOnce(rl, ip);
+    t.now += 15 * 60_000;
+    expect(rl.begin('c').ok).toBe(true);
+    expect(rl.size()).toBe(2);
   });
 
   it('adds a global delay once more than 20 failures (any IP) fall within the window', () => {

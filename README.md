@@ -277,9 +277,12 @@ Short pointers; the full list is in
   30-day sliding. The expiry is parsed strictly and bounded.
 - Every non-GET request (login, logout) must carry an `Origin` equal to the page's own
   origin, and so must the WebSocket handshake.
-- Login attempts are counted before the password is hashed, one at a time per address,
-  at most 5 per 15 minutes; after more than 20 failures from anywhere every login is
-  delayed by 2 s (a delay, never a lockout).
+- Login attempts are counted before the password is hashed, one at a time per address
+  (IPv6 per `/64`), at most 5 per 15 minutes. After more than 20 failures from anywhere,
+  every login is delayed by 2 s and logins from other devices run **one at a time**, so
+  the delay caps the total guess rate; while 5 are already waiting, further ones get
+  `429` straight away. Logins on the laptop itself are never queued, and devices that are
+  already signed in stay signed in.
 - The station role and the `/station` page are **loopback-only**: they answer 403 to
   any other address, before the sign-in check. (If you reach the laptop through an SSH
   tunnel or a local reverse proxy, the server sees loopback — don't do that.)
